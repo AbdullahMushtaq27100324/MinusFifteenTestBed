@@ -1,0 +1,16 @@
+syntax = "proto3";
+package helper;
+option go_package = "./pb";
+
+import "google/protobuf/empty.proto";
+
+service Collector {
+    rpc ReportStatus (stream DataPoint) returns (google.protobuf.Empty);
+}
+
+message DataPoint {
+    float node_number = 1;
+    float temperature_C = 2;
+    float humidity = 3;
+    float heat_index = 4; 
+}

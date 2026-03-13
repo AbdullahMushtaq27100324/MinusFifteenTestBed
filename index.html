@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>IoT Testbed Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <style>
+        /* Base Dashboard Styles */
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #121212; color: white; padding: 0; margin: 0; }
+        .header { display: flex; justify-content: space-between; align-items: center; background: #1e1e1e; padding: 15px 30px; border-bottom: 2px solid #00ff88; margin-bottom: 20px; }
+        .title { font-size: 1.5em; font-weight: bold; }
+        .ticker { font-size: 1.2em; }
+        .ticker-value { font-weight: bold; color: #00ff88; font-family: monospace; }
+        
+        /* Buttons */
+        .controls { padding: 0 30px 20px 30px; display: flex; gap: 10px; }
+        button { border: none; padding: 10px 20px; font-size: 1em; font-weight: bold; border-radius: 4px; cursor: pointer; transition: 0.2s; }
+        .btn-add { background: #00ff88; color: #121212; }
+        .btn-add:hover { background: #00cc6a; }
+        .btn-sim { background: #00aaff; color: #121212; }
+        .btn-sim:hover { background: #0088cc; }
+        
+        /* Node Grid */
+        .grid { display: flex; flex-wrap: wrap; gap: 15px; padding: 0 30px; }
+        .card { background: #2a2a2a; padding: 15px; border-radius: 8px; width: 200px; border-left: 5px solid #00ff88; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        .card h3 { margin-top: 0; color: #aaaaaa; font-size: 1em; text-transform: uppercase; }
+        .metric { font-size: 1.1em; margin: 8px 0; color: #cccccc;}
+        .value { font-weight: bold; color: #ffffff; float: right; }
+
+        /* Modal (Popup) Styles */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center; }
+        .modal { background: #1e1e1e; padding: 30px; border-radius: 8px; width: 90%; max-width: 800px; border: 1px solid #333; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .modal-header h2 { margin: 0; color: #00aaff; }
+        .close-btn { background: #ff4444; color: white; padding: 8px 15px; border-radius: 4px; }
+        .close-btn:hover { background: #cc0000; }
+        .input-group { display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px; background: #2a2a2a; padding: 15px; border-radius: 6px; }
+        .input-group label { display: flex; flex-direction: column; font-size: 0.9em; color: #ccc; font-weight: bold; gap: 5px; }
+        .input-group input { background: #121212; color: #00ff88; border: 1px solid #444; padding: 10px; border-radius: 4px; width: 120px; font-weight: bold; font-family: monospace; font-size: 1.1em; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div class="title">📡 IoT Simulation Testbed</div>
+        <div class="ticker">Total Data Processed: <span class="ticker-value" id="sizeValue">0 B</span></div>
+    </div>
+
+    <div class="controls">
+        <button class="btn-add" onclick="fetch('/add')">+ Add Sensor Node</button>
+        <button class="btn-sim" onclick="openSimulator()">📊 Open Growth Simulator</button>
+    </div>
+    
+    <div class="grid" id="dashboard"></div>
+
+    <div id="simModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Data Growth Simulator</h2>
+                <button class="close-btn" onclick="document.getElementById('simModal').style.display='none'">Close</button>
+            </div>
+            
+            <div class="input-group">
+                <label>Bytes per Msg: <input type="number" id="simBytes" value="56" oninput="updateChart()"></label>
+                <label>Active Sensors: <input type="number" id="simSensors" value="3" oninput="updateChart()"></label>
+                <label>Msgs/Second: <input type="number" id="simRate" value="1" oninput="updateChart()"></label>
+                <label>Days to Run: <input type="number" id="simDays" value="5" oninput="updateChart()"></label>
+            </div>
+
+            <canvas id="growthChart" height="120"></canvas>
+        </div>
+    </div>
+
+    <script>
+        // --- DASHBOARD LOGIC ---
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        setInterval(async () => {
+            try {
+                const response = await fetch('/data');
+                const payload = await response.json(); 
+                
+                document.getElementById('sizeValue').innerText = formatBytes(payload.total_bytes);
+
+                const nodes = payload.nodes;
+                const dashboard = document.getElementById('dashboard');
+                dashboard.innerHTML = ''; 
+
+                for (const id in nodes) {
+                    const node = nodes[id];
+                    dashboard.innerHTML += `
+                        <div class="card" style="position: relative;">
+                            <button onclick="fetch('/kill?id=${id}')" 
+                                style="position: absolute; top: 10px; right: 10px; background: #ff4444; color: white; padding: 2px 8px; font-size: 0.8em; border-radius: 4px;">X</button>
+                                
+                            <h3>Node ${node.node_id}</h3>
+                            <div class="metric">Temp: <span class="value">${node.temp.toFixed(1)}°C</span></div>
+                            <div class="metric">Hum: <span class="value">${node.humidity.toFixed(1)}%</span></div>
+                            <div class="metric">Heat: <span class="value">${node.heat_index.toFixed(1)}</span></div>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                // Fails silently if server is rebooting
+            }
+        }, 500); 
+
+        // --- SIMULATOR LOGIC ---
+        let growthChart; 
+
+        function openSimulator() {
+            document.getElementById('simModal').style.display = 'flex';
+            updateChart(); // Draw it immediately when opened
+        }
+
+        function updateChart() {
+            const bytes = parseFloat(document.getElementById('simBytes').value) || 0;
+            const sensors = parseFloat(document.getElementById('simSensors').value) || 0;
+            const rate = parseFloat(document.getElementById('simRate').value) || 0;
+            const days = parseInt(document.getElementById('simDays').value) || 1;
+
+            const secondsPerDay = 24 * 60 * 60;
+            const labels = [];
+            const dataPoints = [];
+
+            for (let i = 1; i <= days; i++) {
+                labels.push('Day ' + i);
+                const totalBytes = bytes * sensors * rate * secondsPerDay * i;
+                const totalMB = totalBytes / (1024 * 1024); 
+                dataPoints.push(totalMB.toFixed(2));
+            }
+
+            if (growthChart) {
+                growthChart.destroy();
+            }
+
+            const ctx = document.getElementById('growthChart').getContext('2d');
+            growthChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Total Storage (MB)',
+                        data: dataPoints,
+                        borderColor: '#00aaff', // Blue line to match the button
+                        backgroundColor: 'rgba(0, 170, 255, 0.2)',
+                        borderWidth: 3,
+                        fill: true,
+                        tension: 0.2, // Makes the line smoothly curved
+                        pointBackgroundColor: '#fff'
+                    }]
+                },
+                options: {
+                    color: '#fff',
+                    scales: {
+                        y: { 
+                            grid: { color: '#333' }, 
+                            ticks: { color: '#aaa' },
+                            title: { display: true, text: 'Megabytes (MB)', color: '#aaa' }
+                        },
+                        x: { 
+                            grid: { color: '#333' }, 
+                            ticks: { color: '#aaa' } 
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false } // Hides the top label to save space
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+</html>
