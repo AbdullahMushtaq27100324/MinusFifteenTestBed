@@ -1,38 +1,43 @@
 package main
 
 import (
-	"MinusFifteen/pb"
+	"encoding/json"
 	"fmt"
-	"net"
 	"sync/atomic"
-
-	"google.golang.org/grpc"
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
 var globalNodeID atomic.Int32
-var TotalStorageBytes atomic.Int64
+var TotalStorageBytes atomic.Uint64
 
 func main(){
 	fmt.Println("Starting Server...")
 
-	lis, err := net.Listen("tcp",":50051")
-	if err != nil{
-		fmt.Println("Failed to Listen:",err)
-		return
+	opts := mqtt.NewClientOptions().AddBroker("tcp://localhost:1883").SetClientID("Testbed-Server-12345")
+	client := mqtt.NewClient(opts)
+	if token := client.Connect(); token.Wait() && token.Error() != nil {
+		fmt.Println("CRITICAL: Could not connect to public broker.")
+		panic(token.Error())
 	}
 
-	s := grpc.NewServer()
-	pb.RegisterCollectorServer(s, &Server{})
+	client.Subscribe("minusfifteen/data", 0, func(client mqtt.Client, msg mqtt.Message) {
+		var data NodeState
+		json.Unmarshal(msg.Payload(), &data)
+
+		TotalStorageBytes.Add(56) 
+		
+		dataMu.Lock()
+		latestData[data.NodeID] = data
+		dataMu.Unlock()
+	})
 
 	go WebServer()
 
-	fmt.Println("Starting 3 nodes...")
-	startNode(&Node{NodeNumber: int(globalNodeID.Add(1))}, 1)
-    startNode(&Node{NodeNumber: int(globalNodeID.Add(1))}, 1)
-    startNode(&Node{NodeNumber: int(globalNodeID.Add(1))}, 1)
+	// fmt.Println("Starting 3 nodes...")
+	// startNode(&Node{NodeNumber: int(globalNodeID.Add(1))}, 1)
+    // startNode(&Node{NodeNumber: int(globalNodeID.Add(1))}, 1)
+    // startNode(&Node{NodeNumber: int(globalNodeID.Add(1))}, 1)
 
-	fmt.Println("Server listening on :50051")
-	if err := s.Serve(lis); err != nil {
-		fmt.Println("Failed to serve:", err)
-	}
+	fmt.Println("System Online. Waiting for MQTT messages...")
+	select {}
 }
